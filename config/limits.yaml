@@ -1,0 +1,29 @@
+# Limit framework. Values are set by documented CALIBRATION RULES, not chosen by hand.
+# Numeric limits are filled in Session 5, and each rule is recorded in the decision log.
+
+status:
+  warning_pct: 0.80      # WARNING at >= 80% utilisation
+  breach_pct: 1.00       # BREACH at >= 100% utilisation
+
+var_99:
+  levels: [desk, group]
+  calibration_rule: >
+    Set each limit so that average HS 99% VaR utilisation over the evaluation
+    period is about 65%.
+  target_avg_utilisation: 0.65
+  values: {}             # filled by the calibration step
+
+open_position_t:
+  level: book
+  unit: net tonnes CO2
+  values: {}             # to be set in Session 5; rule to be recorded in the decision log
+
+dtl_days:
+  level: book
+  values: {}             # maximum days-to-liquidate per book; set in Session 5
+
+# Mock escalation policy (hypothetical).
+escalation:
+  book: [Desk head, Market & Liquidity Risk]
+  desk: [Desk head, Head of Trading, Market & Liquidity Risk]
+  group: [CRO, Head of Trading, Market & Liquidity Risk]

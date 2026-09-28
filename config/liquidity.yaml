@@ -1,0 +1,26 @@
+# Liquidity assumptions for liquidity-adjusted VaR (Bangia et al., 1999, exogenous spread).
+#
+# ASSUMPTIONS: free data sources do not provide bid-ask spreads. The spreads below
+# are PROVISIONAL placeholders, to be reviewed and justified in Session 5 before use.
+# UKA is assumed wider than EUA; this must be checked against volume data, not asserted.
+
+k: 3                          # LVaR = VaR + 0.5 * sum_i |N_i| * (s_mean_i + k * s_vol_i)
+
+relative_spreads:             # as a fraction of price
+  EUA:
+    mean: 0.0005
+    vol: 0.0002
+    rationale: Benchmark contract; 0.01 tick is about 1-2 bp at recent prices. Provisional.
+  UKA:
+    mean: 0.0020
+    vol: 0.0010
+    rationale: Smaller market than EUA. Provisional; to be checked against volume.
+  TTF:
+    mean: 0.0010
+    vol: 0.0005
+    rationale: Liquid front-month gas contract. Provisional.
+
+days_to_liquidate:
+  participation_rate: 0.10    # share of average daily volume we can trade without moving the price
+  adv_window: 20              # days for average daily volume
+  horizon_scaling: sqrt       # VaR scaled by sqrt(max(1, DTL)); assumes i.i.d. returns

@@ -1,0 +1,72 @@
+# Book definition and model settings.
+# The book is HYPOTHETICAL. Positions are in EUR notional and rebalanced daily
+# to constant notional (see README, decision log).
+
+group: GROUP
+base_currency: EUR
+
+instruments:
+  EUA:
+    currency: EUR
+    lot_size_t: 1000          # ICE EUA futures: 1 lot = 1,000 t CO2
+    description: ICE EUA front-December futures, continuous
+  UKA:
+    currency: GBP
+    lot_size_t: 1000          # ICE UKA futures: 1 lot = 1,000 t CO2
+    description: ICE UKA futures, continuous (contract month under evaluation)
+  TTF:
+    currency: EUR
+    lot_size_t: null          # gas, not carbon: no tonne-based open-position limit
+    description: ICE Endex Dutch TTF front-month futures, continuous
+
+fx_pairs:
+  - EURGBP                    # GBP per 1 EUR (ECB reference rate)
+
+books:
+  EUA_OUTRIGHT:
+    desk: COMPLIANCE
+    positions:
+      EUA: 20000000
+  EUA_UKA_SPREAD:
+    desk: TRADING
+    positions:
+      EUA: 10000000
+      UKA: -10000000
+  CARBON_GAS_RV:
+    desk: TRADING
+    positions:
+      TTF: -5000000
+
+sample:
+  data_start: 2015-01-01
+  eua_eval_start: 2019-01-01         # MSR operational
+  full_book_eval_start: null         # computed from data: first date with 250 days of UKA history
+
+risk:
+  var_confidence: [0.99, 0.975]
+  es_confidence: [0.975]
+
+models:
+  hs:
+    window: 250
+    quantile_method: linear          # np.quantile(..., method="linear")
+  fhs:
+    model: GJR-GARCH(1,1)
+    innovations: student-t
+    refit_every: 21
+    min_obs: 750
+    residual_window: 750
+  ewma:
+    lambda: 0.94
+    variants: [normal, student-t]    # t degrees of freedom taken from the FHS fit
+  qrnn:
+    taus: [0.0025, 0.005, 0.0075, 0.01, 0.0125, 0.015, 0.0175, 0.02, 0.0225, 0.025]
+    hidden_units: [32, 16]
+    dropout: 0.1
+    weight_decay: 1.0e-4
+    refit_every: 21
+    min_obs: 750
+    early_stopping_fraction: 0.2     # last 20% of the training window, in time order
+    n_seeds: 10
+    msr_days_since_cap: 60
+    msr_recent_window: 5

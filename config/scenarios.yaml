@@ -1,0 +1,47 @@
+# Stress scenarios, applied to today's snapshot positions.
+# Historical windows are SEARCHED in the data, not hard-coded.
+# Hypothetical shock sizes are EXPERT JUDGEMENT and labelled as such.
+# All shocks are simple returns.
+
+historical:
+  max_window_days: 10         # worst cumulative EUA move over up to 10 trading days in each search window
+  scenarios:
+    covid_selloff:
+      search_start: 2020-02-15
+      search_end: 2020-04-15
+      direction: down
+    invasion_shock:
+      search_start: 2022-02-15
+      search_end: 2022-03-31
+      direction: down
+    msr_era_rally:            # upside matters: the Trading desk is short UKA and TTF
+      search_start: 2018-01-01
+      search_end: 2018-12-31
+      direction: up
+    energy_crisis_volatility:
+      search_start: 2022-07-01
+      search_end: 2022-09-30
+      direction: down
+
+hypothetical:
+  msr_reform_shock:
+    basis: data-calibrated
+    description: >
+      EUA move equal to the worst 5-day cumulative EUA return in a [-1, +3] day
+      window around any MSR event. UKA moves with its regression beta to EUA; TTF unchanged.
+    event_window: [-1, 3]
+    cumulative_days: 5
+  gas_carbon_decoupling:
+    basis: expert judgement
+    shocks: {TTF: 0.50, EUA: -0.20}
+  eu_uk_linkage_convergence:
+    basis: expert judgement
+    shocks: {UKA: 0.25, EUA: 0.0}
+  gbp_shock:
+    basis: expert judgement
+    shocks: {EURGBP: [-0.05, 0.05]}
+
+reverse_stress:
+  target: group loss equal to a multiple of the group 99% VaR limit
+  multiple_of_group_var_limit: 3
+  solve_for: EUA move, other factors at beta-implied moves

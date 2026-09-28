@@ -1,0 +1,14 @@
+# Raw data is not redistributed (see README, decision log). Keep only the source documentation.
+data/raw/*
+!data/raw/SOURCES.md
+data/*.duckdb
+data/*.duckdb.wal
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Notebooks
+.ipynb_checkpoints/
