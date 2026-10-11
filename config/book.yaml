@@ -9,11 +9,11 @@ instruments:
   EUA:
     currency: EUR
     lot_size_t: 1000          # ICE EUA futures: 1 lot = 1,000 t CO2
-    description: ICE EUA front-December futures, continuous
+    description: ICE EUA futures, nearest-contract continuous (not a pure December series; see SOURCES.md)
   UKA:
     currency: GBP
     lot_size_t: 1000          # ICE UKA futures: 1 lot = 1,000 t CO2
-    description: ICE UKA futures, continuous (contract month under evaluation)
+    description: ICE UKA futures, front-month continuous
   TTF:
     currency: EUR
     lot_size_t: null          # gas, not carbon: no tonne-based open-position limit
@@ -39,8 +39,54 @@ books:
 
 sample:
   data_start: 2015-01-01
+  data_end: 2026-09-25               # sample frozen for all series (decision log, 2026-10-11)
   eua_eval_start: 2019-01-01         # MSR operational
-  full_book_eval_start: null         # computed from data: first date with 250 days of UKA history
+  full_book_eval_start: null         # computed from data by the pipeline, never typed in by hand
+
+# Raw files and cleaning rules. Raw rows are loaded into DuckDB untouched;
+# everything below is applied afterwards, when returns are computed.
+data:
+  raw_dir: data/raw
+  reference_instrument: EUA          # the calendar is anchored on EUA trading days (BUILD_SPEC, Section 2)
+  prices:
+    EUA:
+      file: eua_investing.csv
+      format: investing
+      source: Investing.com, Carbon Emissions Futures
+    UKA:
+      file: uka_investing.csv
+      format: investing
+      source: Investing.com, UK Emissions Allowances (c1)
+    TTF:
+      file: ttf_front_investing.csv
+      format: investing
+      source: Investing.com, Dutch TTF Natural Gas Futures
+  fx:
+    EURGBP:                          # GBP per 1 EUR (ECB convention)
+      file: eurgbp_ecb.csv
+      format: ecb
+  msr_events:
+    file: msr_events.csv
+
+  # Placeholder rows printed by the source on exchange holidays: open = high = low = close,
+  # no volume, price unchanged from the previous day. Dropped before returns are computed.
+  stale_rows:
+    EUA: [2015-04-06, 2016-08-29, 2019-12-26, 2021-04-05]
+
+  # Days on which the source series switches from one futures contract to another.
+  # The return on such a day compares two different contracts, so it is removed for the
+  # whole book. Identified from volume regime changes (see SOURCES.md); the December
+  # dates are accurate to within a day.
+  excluded_returns:
+    EUA:
+      - 2022-12-19
+      - 2023-03-27
+      - 2023-12-18
+      - 2024-01-15
+      - 2024-12-10
+      - 2025-06-23
+      - 2025-12-15
+      - 2026-06-22
 
 risk:
   var_confidence: [0.99, 0.975]

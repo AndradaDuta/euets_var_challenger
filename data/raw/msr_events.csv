@@ -1,0 +1,28 @@
+date,description,event_id,event_type,date_precision
+2014-01-22,Commission proposes the MSR,1,risk_introducing,exact
+2015-03-05,Council General Approach on MSR,2,risk_resolving,exact
+2015-10-06,Decision (EU) 2015/1814 adopted,3,risk_resolving,exact
+2016-04-04,Poland files Case C-5/16 at the ECJ,4,risk_introducing,exact
+2017-05-15,TNAC 2016 publication (first TNAC),5,recurring_informational,month
+2018-03-14,Directive (EU) 2018/410 adopted,6,risk_resolving,exact
+2018-05-15,TNAC 2017 publication,7,recurring_informational,month
+2018-06-21,ECJ judgment in Case C-5/16,8,risk_resolving,exact
+2019-01-01,MSR becomes operational,9,implementation_milestone,exact
+2019-05-15,TNAC 2018 publication,10,recurring_informational,month
+2019-12-11,European Green Deal Communication,11,risk_introducing,exact
+2020-05-15,TNAC 2019 publication,12,recurring_informational,month
+2021-05-15,TNAC 2020 publication,13,recurring_informational,month
+2021-07-14,Fit for 55 package – MSR proposal,14,risk_introducing,exact
+2022-05-13,TNAC 2021 publication,15,recurring_informational,exact
+2022-06-22,EP plenary vote on ETS revision fails,16,risk_introducing,exact
+2022-06-29,Council General Approach on ETS revision,17,risk_resolving,exact
+2022-12-18,Trilogue provisional agreement on ETS revision,18,risk_resolving,exact
+2023-01-01,First MSR invalidation (~2.5 bn allowances),19,implementation_milestone,exact
+2023-04-19,Decision (EU) 2023/852 adopted,20,risk_resolving,exact
+2023-05-10,Directive (EU) 2023/959 adopted,21,risk_resolving,exact
+2023-05-15,TNAC 2022 publication,22,recurring_informational,exact
+2024-01-01,Second invalidation; revised rules take effect,23,implementation_milestone,exact
+2024-05-31,TNAC 2023 publication,24,recurring_informational,exact
+2025-01-01,Third annual invalidation,25,recurring_informational,exact
+2025-05-28,TNAC 2024 publication,26,recurring_informational,exact
+2025-11-27,Commission proposes ETS2 MSR amendments,27,risk_introducing,exact

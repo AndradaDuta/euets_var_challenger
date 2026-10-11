@@ -1,8 +1,12 @@
 # Raw data is not redistributed (see README, decision log). Keep only the source documentation.
 data/raw/*
 !data/raw/SOURCES.md
+!data/raw/msr_events.csv
 data/*.duckdb
 data/*.duckdb.wal
+
+# macOS
+.DS_Store
 
 # Python
 __pycache__/

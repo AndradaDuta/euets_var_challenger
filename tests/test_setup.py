@@ -12,8 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BOOK_CONFIG = REPO_ROOT / "config" / "book.yaml"
 
 EXPECTED_TABLES = {
-    "instruments", "hierarchy", "limits", "prices", "fx_rates", "msr_events",
-    "positions", "pnl", "risk_results", "stress_results",
+    "instruments", "hierarchy", "limits", "prices", "fx_rates", "msr_events", "returns",
+    "positions", "pnl_attribution", "pnl", "risk_results", "stress_results",
 }
 
 

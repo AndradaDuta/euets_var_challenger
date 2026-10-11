@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS limits (
 -- Market data (stored raw, before any transformation)
 -- ---------------------------------------------------------------------------
 
--- Daily settlement prices in the instrument's own currency.
+-- Daily prices in the instrument's own currency, exactly as downloaded.
+-- 'settle' holds the closing price published by the source (see data/raw/SOURCES.md).
 CREATE TABLE IF NOT EXISTS prices (
     date        DATE,
     instrument  VARCHAR,
@@ -63,6 +64,22 @@ CREATE TABLE IF NOT EXISTS msr_events (
 );
 
 -- ---------------------------------------------------------------------------
+-- Derived market data
+-- ---------------------------------------------------------------------------
+
+-- Daily log returns per risk factor on the book calendar, after cleaning.
+-- Not in the original spec; see decision log.
+--   factor   : an instrument (own currency) or an FX factor such as 'GBPEUR'
+--   eua_days : EUA trading days covered by the return; > 1 marks a multi-day return
+CREATE TABLE IF NOT EXISTS returns (
+    date        DATE,
+    factor      VARCHAR,
+    log_return  DOUBLE,
+    eua_days    INTEGER,
+    PRIMARY KEY (date, factor)
+);
+
+-- ---------------------------------------------------------------------------
 -- Positions
 -- ---------------------------------------------------------------------------
 
@@ -79,7 +96,21 @@ CREATE TABLE IF NOT EXISTS positions (
 -- Outputs (long format: one row per value)
 -- ---------------------------------------------------------------------------
 
+-- Hypothetical P&L per book leg, split into components. Not in the original spec; see decision log.
+--   component : 'PRICE' (instrument move in its own currency), 'FX' (currency move),
+--               'CROSS' (price move x currency move). EUR legs have 'PRICE' only.
+-- The components of a book sum exactly to its row in pnl.
+CREATE TABLE IF NOT EXISTS pnl_attribution (
+    date        DATE,
+    book        VARCHAR,
+    instrument  VARCHAR,
+    component   VARCHAR,
+    pnl_eur     DOUBLE,
+    PRIMARY KEY (date, book, instrument, component)
+);
+
 -- Hypothetical (static-position) P&L at book, desk and group level.
+-- A row dated t is the P&L from the previous calendar date to t.
 CREATE TABLE IF NOT EXISTS pnl (
     date                  DATE,
     level                 VARCHAR,

@@ -1,6 +1,6 @@
 # euets_var_challenger
 
-> **Status: work in progress.** Session 1 of 5 (data layer and hypothetical P&L) is under way. There are no results yet. This README describes the design and will be updated from pipeline output as each stage is completed. See [Roadmap](#roadmap).
+> **Status: work in progress.** Session 1 of 5 (data layer and hypothetical P&L) is under way. The data layer and the P&L engine are implemented and tested. Two of the five raw files (TTF and EUR/GBP) are still to be loaded, so the full-book P&L is not built yet. There are no risk results yet. This README describes the design and will be updated from pipeline output as each stage is completed. See [Roadmap](#roadmap).
 
 A market and liquidity risk engine for a hypothetical environmental-commodities book: EU and UK carbon allowances (EUA, UKA) and Dutch TTF gas.
 
@@ -31,9 +31,13 @@ A null result for the challenger is an acceptable, reportable outcome. The aim i
 
 **Constant notional.** Positions are rebalanced daily to constant EUR notional. Without this, the P&L series would be dominated by the EUA price level, which rose from single digits to around €100 over the sample.
 
-**FX.** The UKA leg is GBP-denominated. EUR/GBP is treated as a separate risk factor, and its contribution is reported separately.
-
 **P&L perspective.** All backtests use *hypothetical* (static-position) P&L: today's positions revalued at the next day's prices. *Actual* P&L, which includes intraday trading, fees and new deals, is out of scope. Hypothetical P&L separates the model's forecast from trading activity, which a clean VaR backtest requires.
+
+**P&L convention.** A leg with notional *N* earns *N* × (P<sub>t</sub> / P<sub>t−1</sub> − 1), its simple return. Risk-factor returns are stored as log returns and converted. The portfolio return a model is fitted on is the node's P&L divided by its gross notional, so VaR in EUR is exactly a quantile of the P&L distribution.
+
+**FX.** The UKA leg is GBP-denominated. EUR/GBP is treated as a separate risk factor. The leg's EUR P&L is split into a price component, an FX component and a cross term, which sum exactly to the total and are stored separately.
+
+**One calendar.** A date is used when every instrument that has started trading has a price. Prices are never forward-filled; a day that is not common to all instruments is dropped for the whole book, and the return that then spans more than one day is flagged. Book, desk and group P&L therefore cover the same interval on every date and reconcile row by row (`v_pnl_reconciliation`).
 
 ## Models (planned)
 
@@ -81,18 +85,19 @@ The following tests will be applied to each model and each portfolio (Compliance
 
 | Series | Source | Status |
 |---|---|---|
-| EUA | ICE EUA front-December futures, continuous (Investing.com) | Identified; 1 lot = 1,000 t |
-| UKA | ICE UKA futures (Investing.com, "UK Emissions Allowances") | Under evaluation: the available series appears to be front-month rather than December, and its liquidity has not yet been checked |
+| EUA | ICE EUA futures, nearest-contract continuous (Investing.com, "Carbon Emissions Futures"); 1 lot = 1,000 t | Downloaded and checked. It is **not** a pure December series: it switches contract at irregular dates, and the returns on eight switch days are excluded |
+| UKA | ICE UKA futures, front-month continuous (Investing.com, "UK Emissions Allowances"); 1 lot = 1,000 t | Downloaded and checked. Used for returns; its volume resembles the December contract only from November to mid-December |
 | TTF | ICE Endex Dutch TTF front-month (Investing.com) | To download |
 | EUR/GBP | ECB reference rate | To download |
-| MSR events | 27 announcement dates from [msr_carbon_repricing](https://github.com/AndradaDuta/msr_carbon_repricing) | Available |
+| MSR events | 27 announcement dates from [msr_carbon_repricing](https://github.com/AndradaDuta/msr_carbon_repricing) | In `data/raw/msr_events.csv` |
 
-**Raw data is not included in this repository.** The Investing.com terms of use do not permit redistribution. `data/raw/SOURCES.md` will document every series (source URL, download date and contract definition) so the dataset can be rebuilt.
+**Raw price data is not included in this repository.** The Investing.com terms of use do not permit redistribution. [`data/raw/SOURCES.md`](data/raw/SOURCES.md) documents every series: source, contract definition, the checks run on it and how to rebuild the dataset.
 
 **Sample periods:**
+- The sample is frozen at 2026-09-25 for all series.
 - Data from 2015 onwards is used as a training warm-up.
 - EUA-only evaluation starts on 2019-01-01, when the MSR became operational.
-- Full-book evaluation starts once 250 days of UKA history exist. The exact date will be computed from the data.
+- The full book cannot be valued before 2021-05-21, the first UKA return. Full-book evaluation start dates are computed by the pipeline from the number of prior returns each model needs, and will be recorded here once all five files are loaded.
 
 ## Roadmap
 
@@ -118,7 +123,12 @@ python -m euets_var.pipeline --config config/book.yaml
 pytest
 ```
 
-The pipeline currently creates the DuckDB database and loads the book's reference data (instruments and hierarchy). The tests check the schema and the book configuration. Price loading, P&L and the models follow in later sessions.
+The pipeline currently:
+- creates the DuckDB database and loads the raw files as downloaded
+- computes log returns per risk factor on the book calendar
+- writes hypothetical P&L at book, desk and group level, with its price, FX and cross components
+
+It values only what the loaded files support: a book whose inputs are missing is reported as skipped, and no desk or group total is built from a partial set of books. The tests cover file parsing, the calendar, look-ahead in the returns, the FX decomposition and reconciliation across the hierarchy. They run on synthetic data, so they pass without the raw files. The models follow in later sessions.
 
 Stack: Python 3.11, pandas, numpy, scipy, statsmodels, arch, PyTorch, DuckDB, matplotlib and pytest.
 
@@ -128,7 +138,10 @@ Stack: Python 3.11, pandas, numpy, scipy, statsmodels, arch, PyTorch, DuckDB, ma
 - Bid–ask spreads are assumed, not observed.
 - √T liquidity-horizon scaling assumes i.i.d. returns.
 - UKA history starts with the UK ETS launch (2021), which shortens the full-book evaluation window.
-- Prices come from free sources. Continuous-contract construction and roll handling are documented in the decision log.
+- Prices come from free sources and are the closes the source publishes, not official exchange settlements.
+- The EUA series is not a pure December contract. Eight contract-switch days are excluded; one switch is verified against published December-contract closes, and the other seven are inferred from volume alone.
+- The UKA series is front-month. Its drift towards the December price is documented, not corrected.
+- Days that are not common to all instruments are dropped, so a small share of returns span more than one trading day. They are flagged in the `returns` table.
 
 **Out of scope (possible extensions):**
 - options and full revaluation
@@ -145,10 +158,20 @@ Stack: Python 3.11, pandas, numpy, scipy, statsmodels, arch, PyTorch, DuckDB, ma
 | 2026-09-26 | HS quantile uses linear interpolation (`np.quantile(..., method="linear")`) | Lower / nearest order statistic | With 250 observations the 1% quantile depends on just a few of the worst returns, so the convention changes the VaR number and must be fixed and stated |
 | 2026-09-26 | Raw price data is not committed to the repository | Commit raw CSVs | Investing.com terms prohibit redistribution; `SOURCES.md` documents how to rebuild the dataset |
 | 2026-09-26 | Added an `msr_events` table to the schema | Keep MSR dates in a CSV read directly by the feature code | MSR dates feed both the QRNN features and the MSR stress scenario; storing them in the database keeps all raw inputs in one place |
-| 2026-09-26 | EUA series: Investing.com "Carbon Emissions Futures" (front-December continuous) | Spot / daily EUA; Ember | Front-December is the liquid benchmark contract; the source lists a December settlement and a 1,000 t contract size |
+| 2026-09-26 | ~~EUA series: Investing.com "Carbon Emissions Futures" (front-December continuous)~~ **Superseded on 2026-10-04: the series is not front-December** | Spot / daily EUA; Ember | The source lists a December settlement and a 1,000 t contract size. The label turned out to be a poor guide to the data |
+| 2026-10-04 | EUA series treated as a nearest-contract continuous. Returns on eight contract-switch days (December 2022 to June 2026) are excluded for the whole book | Winsorise the switch days (spec, Section 2); carry-adjust with an interest-rate series; rebuild the switch-day returns from published December-contract closes; find a true December series | The return on a switch day compares two different contracts. On 27 March 2023 the series shows +3.1% while the December contract moved −0.3%. Winsorising would leave most of such a jump in |
+| 2026-10-04 | UKA front-month series used for returns as downloaded; its roll drift is documented, not corrected | Find a December UKA series; drop the spread book | Prices move on no-volume days with the same volatility as on traded days, so the series is not stale. No free December UKA series was found |
+| 2026-10-04 | Volume is used for liquidity only where a series tracks the December contract (EUA: liquid stretches; UKA: November to mid-December). To be implemented in Session 5 | 20-day average volume on all days (spec, Section 6) | Elsewhere the volume belongs to a thin contract that nobody would use to liquidate the position |
+| 2026-10-11 | Sample frozen at 2026-09-25 for all series | Roll the end date forward with each download (spec: "latest available date") | A fixed cut-off makes every reported number reproducible from the documented downloads |
+| 2026-10-11 | Four EUA placeholder rows on UK bank holidays are dropped | Keep them as zero returns | Flat prices with no volume are not trading days; keeping them adds artificial zero returns |
+| 2026-10-11 | One calendar for the whole book: a date is used when every instrument that has started trading has a price. Returns spanning more than one EUA trading day are flagged | A separate calendar per book (spec, Section 2: "drop non-common days per book"); forward-fill prices | Book, desk and group P&L cover the same interval on every date, so they reconcile row by row. Cost: the Compliance desk also loses the days on which only UKA is closed |
+| 2026-10-11 | Hypothetical P&L uses simple returns; the portfolio return is P&L over gross notional. Risk-factor returns stay log returns. Deviates from the spec formula, which sums log returns across legs | Sum log returns across legs (spec, Section 3) | Log returns do not add across legs and misstate large moves. On 1 March 2022 EUA fell 16.3%; its log return is −17.7%, which would overstate the loss on the €20m book by about €0.3m. For a short leg the error understates losses |
+| 2026-10-11 | UKA leg P&L is split into price, FX and cross components | Log-additive split with no cross term | Follows from simple-return P&L. The three parts sum exactly to the total and nothing is allocated arbitrarily |
+| 2026-10-11 | Added `returns` and `pnl_attribution` tables and the `v_pnl_reconciliation` view | Recompute returns in pandas on every use; store only node-level P&L | Cleaned returns, the multi-day flag and the FX contribution can be queried and reconciled in SQL |
 
 **Open questions:**
-- **UKA series.** Choose between front-month and December. Check for stale prices and zero-volume days before deciding.
-- **Roll handling.** Compute roll-day returns on the held contract where possible; otherwise flag and winsorise. To be fixed after inspecting the downloaded series.
-- **Full-book evaluation start date.** To be computed from the data.
-- **UKA leg's EUR P&L.** Choose between a log-additive split (exact decomposition) and an arithmetic split (leaves a cross term).
+- **Full-book evaluation start date.** Proposal: compare all four models from the first date with 750 prior full-book returns, and also report HS and EWMA from the first date with 250. Both dates are computed by the pipeline and depend on the TTF calendar, so they will be fixed once all files are loaded. The full-book window will be short, and the low power of the coverage tests must be stated with the results.
+- **TTF roll handling.** The front-month series rolls every month. To be decided after inspecting the downloaded file.
+- **Multi-day returns in the backtests.** Decide in Session 4 whether to leave them out of the coverage tests.
+- **Remaining EUA switch days.** Seven of the eight are inferred from volume alone. They can be checked against published December-contract closes.
+- **MSR event dates.** Five dates have month-only precision and six fall on non-trading days. To be resolved in Session 3 before they become model features.
