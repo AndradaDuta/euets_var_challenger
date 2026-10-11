@@ -5,7 +5,7 @@ Flow
 1. ``load_raw``         raw CSV files -> ``prices``, ``fx_rates``, ``msr_events`` (stored untouched)
 2. ``read_prices``      raw prices -> wide frame, cut at the sample end, stale rows removed
 3. ``book_calendar``    the dates on which the whole book can be valued
-4. ``compute_returns``  log returns per risk factor on that calendar
+4. ``compute_returns``  log returns per risk factor on that calendar, contract-switch days removed
 5. ``write_returns``    -> ``returns``
 
 Conventions
@@ -255,8 +255,16 @@ def load_raw(con: duckdb.DuckDBPyConnection, cfg: dict, raw_dir: str | Path | No
 # ---------------------------------------------------------------------------
 
 
+def _flatten(values: Iterable | None) -> list:
+    """Flatten nested lists, so config dates can be grouped (e.g. one list per year)."""
+    flat: list = []
+    for value in [] if values is None else values:
+        flat.extend(_flatten(value) if isinstance(value, (list, tuple)) else [value])
+    return flat
+
+
 def _as_timestamps(dates: Iterable | None) -> pd.DatetimeIndex:
-    return pd.DatetimeIndex(pd.to_datetime(list(dates or [])))
+    return pd.DatetimeIndex(pd.to_datetime(_flatten(dates)))
 
 
 def sample_bounds(cfg: dict) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -339,6 +347,44 @@ def fx_factor_name(pair: str) -> str:
     return pair[3:] + pair[:3]
 
 
+def front_month_roll_dates(
+    trading_dates: Iterable,
+    holidays: Iterable | None = None,
+    business_days_before_delivery: int = 2,
+) -> pd.DatetimeIndex:
+    """First trading date after each monthly expiry of a front-month futures series.
+
+    A front-month series follows the contract for the coming delivery month until that contract
+    stops trading, then switches to the next one. The contract stops trading a fixed number of
+    business days before the first calendar day of its delivery month (two UK business days for
+    ICE Endex TTF). The return on the first trading date after an expiry therefore compares the
+    old contract with the new one.
+
+    ``holidays`` are the non-business days of the calendar that governs the expiry, on top of
+    weekends. Expiries before the first trading date are ignored.
+    """
+    dates = pd.DatetimeIndex(pd.to_datetime(list(trading_dates))).sort_values()
+    if dates.empty:
+        return dates
+    non_business = np.array([h.date() for h in _as_timestamps(holidays)], dtype="datetime64[D]")
+    month_starts = pd.date_range(dates[0].replace(day=1), dates[-1] + pd.offsets.MonthBegin(1), freq="MS")
+
+    rolls = []
+    for month_start in month_starts:
+        # roll="forward": a month starting on a weekend or holiday is counted back from its first business day.
+        expiry = pd.Timestamp(
+            np.busday_offset(
+                np.datetime64(month_start.date()), -business_days_before_delivery, roll="forward", holidays=non_business
+            )
+        )
+        if expiry < dates[0]:
+            continue
+        after = dates[dates > expiry]
+        if len(after):
+            rolls.append(after[0])
+    return pd.DatetimeIndex(rolls).unique()
+
+
 def compute_returns(
     settle: pd.DataFrame,
     fx: pd.DataFrame | None = None,
@@ -351,9 +397,10 @@ def compute_returns(
     (e.g. ``GBPEUR``), and ``eua_days``, the number of reference-calendar trading days the return
     covers. ``eua_days > 1`` marks a multi-day return, created when a non-common day was dropped.
 
-    ``excluded`` maps a factor to dates whose return must not be used (contract-splice days).
-    The return covering such a date is removed for every factor, so the book has no P&L that day.
-    The following day's return is unaffected: it compares two prices of the new contract.
+    ``excluded`` maps a factor to dates on which its series switches contract. The factor's return
+    covering such a date is set to missing, so every node exposed to that factor has no P&L that
+    day; other factors keep their return. The following day's return is unaffected: it compares
+    two prices of the new contract.
     """
     calendar = book_calendar(settle, reference)
     prices = settle.loc[calendar]
@@ -373,18 +420,42 @@ def compute_returns(
     returns = returns.iloc[1:].copy()  # the first calendar date has no previous price
     returns[EUA_DAYS] = returns[EUA_DAYS].astype(int)
 
-    to_drop = []
     for factor, dates in (excluded or {}).items():
         if factor not in settle.columns:
             continue
         for day in _as_timestamps(dates):
             if day not in settle.index or np.isnan(settle.at[day, factor]):
-                raise ValueError(f"excluded_returns for {factor}: no price on {day.date()}")
+                raise ValueError(f"excluded returns for {factor}: no price on {day.date()}")
             # The return that covers `day` is the first calendar return dated on or after it.
             covering = returns.index[returns.index >= day]
             if len(covering):
-                to_drop.append(covering[0])
-    return returns.drop(index=pd.DatetimeIndex(to_drop).unique())
+                returns.loc[covering[0], factor] = np.nan
+    return returns
+
+
+def excluded_return_dates(settle: pd.DataFrame, cfg: dict) -> dict[str, pd.DatetimeIndex]:
+    """Contract-switch dates per factor: the listed ones plus those implied by a roll rule.
+
+    ``data.excluded_returns`` lists dates found by inspecting a series. ``data.roll_returns``
+    names a rule for series that roll on a known schedule; the dates are then computed from the
+    instrument's own trading dates, so they follow the data when the sample is extended.
+    """
+    data_cfg = cfg["data"]
+    out: dict[str, pd.DatetimeIndex] = {}
+    for factor, dates in (data_cfg.get("excluded_returns") or {}).items():
+        out[factor] = _as_timestamps(dates)
+    for factor, rule in (data_cfg.get("roll_returns") or {}).items():
+        if factor not in settle.columns:
+            continue
+        if rule["rule"] != "front_month":
+            raise ValueError(f"roll_returns for {factor}: unknown rule {rule['rule']!r}")
+        rolls = front_month_roll_dates(
+            settle.index[settle[factor].notna()],
+            holidays=data_cfg.get("uk_bank_holidays"),
+            business_days_before_delivery=rule.get("business_days_before_delivery", 2),
+        )
+        out[factor] = out.get(factor, pd.DatetimeIndex([])).union(rolls)
+    return out
 
 
 def write_returns(con: duckdb.DuckDBPyConnection, returns: pd.DataFrame) -> None:
@@ -410,7 +481,7 @@ def build_returns(con: duckdb.DuckDBPyConnection, cfg: dict) -> pd.DataFrame:
     return compute_returns(
         settle,
         read_fx(con, cfg),
-        excluded=cfg["data"].get("excluded_returns"),
+        excluded=excluded_return_dates(settle, cfg),
         reference=cfg["data"].get("reference_instrument", "EUA"),
     )
 

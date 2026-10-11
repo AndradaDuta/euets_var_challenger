@@ -10,6 +10,8 @@ from euets_var.data import (
     book_calendar,
     compute_returns,
     evaluation_start,
+    excluded_return_dates,
+    front_month_roll_dates,
     parse_ecb_csv,
     parse_investing_csv,
     parse_msr_csv,
@@ -168,18 +170,20 @@ def test_fx_is_forward_filled_and_inverted():
     assert r.loc["2024-01-08", "GBPEUR"] == pytest.approx(-np.log(0.82 / 0.84))
 
 
-def test_excluded_return_is_removed_and_next_day_is_intact():
-    r = compute_returns(toy_prices(), excluded={"EUA": ["2024-01-03"]})
-    assert pd.Timestamp("2024-01-03") not in r.index  # removed for every factor
-    assert r.loc["2024-01-04", "EUA"] == pytest.approx(np.log(99 / 99))  # still a one-day return
-    assert r.loc["2024-01-04", "UKA"] == pytest.approx(np.log(55 / 50))
+def test_excluded_return_is_removed_for_that_factor_only_and_next_day_is_intact():
+    r = compute_returns(toy_prices(), excluded={"EUA": ["2024-01-04"]})
+    assert np.isnan(r.loc["2024-01-04", "EUA"])  # the contaminated return is gone
+    assert r.loc["2024-01-04", "UKA"] == pytest.approx(np.log(55 / 50))  # other factors keep theirs
+    assert r.loc["2024-01-08", "EUA"] == pytest.approx(np.log(103 / 99))  # next return starts from the new price
+    assert r["EUA"].notna().sum() == len(r) - 1
 
 
 def test_excluded_date_on_a_dropped_day_removes_the_covering_return():
-    # The splice falls on 5 Jan, which is not a calendar date; its jump sits inside the 8 Jan return.
+    # The switch falls on 5 Jan, which is not a calendar date; its jump sits inside the 8 Jan return.
     r = compute_returns(toy_prices(), excluded={"EUA": ["2024-01-05"]})
-    assert pd.Timestamp("2024-01-08") not in r.index
-    assert pd.Timestamp("2024-01-09") in r.index
+    assert np.isnan(r.loc["2024-01-08", "EUA"])
+    assert not np.isnan(r.loc["2024-01-08", "UKA"])
+    assert not np.isnan(r.loc["2024-01-09", "EUA"])
 
 
 def test_excluded_date_without_a_price_is_an_error():
@@ -206,6 +210,61 @@ def test_no_look_ahead_in_returns():
 
     pd.testing.assert_frame_equal(base.loc[:cut], perturbed.loc[:cut])
     assert not base.loc[idx[40]:].equals(perturbed.loc[idx[40]:])  # the perturbation did bite
+
+
+# --- front-month roll dates -------------------------------------------------
+
+
+def test_roll_date_is_the_day_after_expiry_two_business_days_before_the_month():
+    dates = pd.bdate_range("2026-06-01", "2026-07-10")
+    # 1 July 2026 is a Wednesday: Tuesday 30 June is one business day before, Monday 29 June two.
+    # The July contract expires on the 29th, so the 30 June return compares July with August.
+    assert front_month_roll_dates(dates).tolist() == [pd.Timestamp("2026-06-30")]
+
+
+def test_roll_date_when_the_month_starts_on_a_weekend():
+    dates = pd.bdate_range("2022-09-01", "2022-10-14")
+    # 1 October 2022 is a Saturday: Friday 30 September is one business day before, Thursday 29 two.
+    assert front_month_roll_dates(dates).tolist() == [pd.Timestamp("2022-09-30")]
+
+
+def test_roll_date_respects_bank_holidays():
+    dates = pd.bdate_range("2020-08-03", "2020-09-11")
+    # Monday 31 August 2020 was a UK bank holiday, so the September contract expired on Thursday 27 August.
+    with_holiday = front_month_roll_dates(dates, holidays=[["2020-08-31"]])  # nested lists are accepted
+    assert with_holiday.tolist() == [pd.Timestamp("2020-08-28")]
+    # Ignoring the holiday puts the roll one trading day late.
+    assert front_month_roll_dates(dates).tolist() == [pd.Timestamp("2020-08-31")]
+
+
+def test_roll_date_is_the_next_date_the_series_actually_trades():
+    dates = pd.bdate_range("2026-06-01", "2026-07-10").drop(pd.Timestamp("2026-06-30"))
+    assert front_month_roll_dates(dates).tolist() == [pd.Timestamp("2026-07-01")]
+
+
+def test_one_roll_per_month_and_none_before_the_series_starts():
+    dates = pd.bdate_range("2023-01-02", "2023-12-29")
+    rolls = front_month_roll_dates(dates)
+    # The January 2023 contract expired in December 2022, before the series starts.
+    assert len(rolls) == 12
+    assert rolls[0] == pd.Timestamp("2023-01-31") and rolls[-1] == pd.Timestamp("2023-12-29")
+    assert rolls.to_period("M").is_unique
+
+
+def test_excluded_dates_combine_listed_dates_and_roll_rules():
+    idx = pd.bdate_range("2026-06-01", "2026-07-10")
+    settle = pd.DataFrame({"EUA": 80.0, "TTF": 40.0}, index=idx)
+    cfg = {
+        "data": {
+            "excluded_returns": {"EUA": ["2026-06-22"]},
+            "roll_returns": {"TTF": {"rule": "front_month", "business_days_before_delivery": 2}, "XYZ": {"rule": "front_month"}},
+            "uk_bank_holidays": [],
+        }
+    }
+    out = excluded_return_dates(settle, cfg)
+    assert out["EUA"].tolist() == [pd.Timestamp("2026-06-22")]
+    assert out["TTF"].tolist() == [pd.Timestamp("2026-06-30")]
+    assert "XYZ" not in out  # no prices loaded for it
 
 
 def test_evaluation_start_counts_prior_observations_only():

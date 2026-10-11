@@ -104,8 +104,14 @@ def print_summary(summary: dict, cfg: dict, db_path: str) -> None:
     print(f"\nReturns: {len(returns)} calendar dates, {returns.index.min().date()} to {returns.index.max().date()}")
     for factor in factors:
         r = returns[factor].dropna()
+        if r.empty:
+            continue
         print(f"  {factor:<7} {len(r):>5} returns from {r.index.min().date()}")
     print(f"  multi-day returns (non-common days dropped): {int((returns[EUA_DAYS] > 1).sum())}")
+    removed = {f: int(returns.loc[returns[f].first_valid_index():, f].isna().sum()) for f in factors}
+    removed = {f: n for f, n in removed.items() if n}
+    if removed:
+        print("  returns removed on contract-switch days: " + ", ".join(f"{f} {n}" for f, n in removed.items()))
 
     print("\nHypothetical P&L")
     if not summary["nodes"]:

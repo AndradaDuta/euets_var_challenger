@@ -10,11 +10,11 @@ are stored in the raw tables but never used.
 |---|---|---|---|---|
 | `eua_investing.csv` | EUA | [Investing.com, Carbon Emissions Futures](https://www.investing.com/commodities/carbon-emissions-historical-data) | ICE EUA futures, nearest-contract continuous. **Not** a pure December series (see below). 1 lot = 1,000 t | _to fill in_ (file ends 2026-09-25) |
 | `uka_investing.csv` | UKA | [Investing.com (UK site), UK Emissions Allowances c1](https://uk.investing.com/commodities/uk-emissions-allowances-energy-c1-futures-historical-data) | ICE UKA futures, front-month continuous, in GBP. 1 lot = 1,000 t | 2026-10-04 |
-| `ttf_front_investing.csv` | TTF | Investing.com, Dutch TTF Natural Gas Futures | Front-month continuous, monthly roll. **Not yet downloaded or checked** | |
-| `eurgbp_ecb.csv` | EUR/GBP | ECB Data Portal, series `EXR.D.GBP.EUR.SP00.A` | Daily reference rate, GBP per 1 EUR. **Not yet downloaded** | |
+| `ttf_front_investing.csv` | TTF | Investing.com, Dutch TTF Natural Gas Futures | ICE Endex Dutch TTF futures, front-month continuous, in EUR/MWh. Switches contract every month (see below) | 2026-10-11 |
+| `eurgbp_ecb.csv` | EUR/GBP | ECB Data Portal, series `EXR.D.GBP.EUR.SP00.A` | Daily euro reference rate, GBP per 1 EUR, full history from 1999 | 2026-10-11 |
 | `msr_events.csv` | MSR events | [msr_carbon_repricing](https://github.com/AndradaDuta/msr_carbon_repricing), `data/events/EU_MSR_Events_sign.xlsx`, sheet `events` | 27 announcement dates. Own thesis dataset, so this file **is** committed | 2026-10-11 |
 
-In both Investing.com files the `Price` column is the closing price the site publishes. It is loaded into the
+In the Investing.com files the `Price` column is the closing price the site publishes. It is loaded into the
 `settle` column, but it is not guaranteed to equal the official ICE settlement price.
 
 ## How to rebuild
@@ -75,6 +75,23 @@ Figures in this section were produced from the files on 2026-10-11, on the sampl
 - **Calendar.** EUA has a price on 24 days when UKA does not (UK bank holidays), never the reverse.
 - **Co-movement.** Correlation with EUA log returns on common dates is 0.57 (0.50 to 0.72 by calendar year). Lag-1 autocorrelation is +0.18, against −0.06 for EUA over the same period, which hints at some smoothing in the prices.
 - **Volume** resembles the December contract only from November to the December expiry. In the 1 November to 10 December windows of 2021 to 2025, median EUA volume is 8 to 13 times median UKA volume.
+
+### TTF
+
+- 3,049 rows, 2015-01-02 to 2026-10-09. No duplicate dates. `Change %` is reproduced by `Price` to within rounding. Volume is present on almost every day.
+- **Calendar.** The file has a price on every EUA trading day, so TTF removes no dates from the calendar. From 12 April 2026 it also carries 25 Sunday rows with very low volume; these are never used, because EUA has no price on a Sunday.
+- **Front-month series.** The [ICE contract specification](https://www.ice.com/api/productguide/spec/27996665/pdf) says trading ceases "two UK Business Days prior to the first calendar day of the delivery month". The series therefore switches contract on the next trading day, and that day's return compares two contracts.
+- **The switch shows in the data.** On the 140 roll days in the sample the mean log return is +1.3% (t-statistic 2.6), against −0.02% on other days, and the standard deviation is 6.2% against 4.4%. The sign follows the season, as a gas forward curve should: on average positive for the rolls from the end of March to the end of November (largest at the end of September, +6.0%) and negative from the end of December to the end of February. The largest are +31.7% on 2019-09-30, +23.0% on 2020-08-28, +22.3% on 2020-05-29 and −21.3% on 2021-12-31.
+- **The UK business-day rule matters.** Monday 31 August 2020 was a UK bank holiday, so the September contract expired on Thursday 27 August, and the +23.0% jump is on Friday 28 August, not on the last trading day of the month. Bank holidays move six of the 140 roll dates in this way.
+- **All 140 roll-day returns are excluded** (`data.roll_returns` in `config/book.yaml`). The dates are computed from the rule and the bank-holiday list in the config, not listed by hand. The size of each gap is not observable from this file, so the returns are removed, not adjusted.
+- **Two placeholder rows are dropped** (`data.stale_rows`): 2015-05-04 and 2023-04-10, both UK bank holidays with open = high = low = close, no volume and an unchanged price.
+
+### EUR/GBP
+
+- 7,111 fixings, 1999-01-04 to 2026-10-09. No duplicate dates, no weekend rows. The 62 blank rows in the export are days without a fixing and are skipped by the loader.
+- The rate is GBP per 1 EUR. The risk factor used in the P&L is its inverse, the EUR value of 1 GBP.
+- Since UKA began trading, three calendar dates have no fixing and use the previous one: 1 May in 2024, 2025 and 2026.
+- On the UKA leg, the price, FX and cross components sum to the P&L recomputed directly from EUR-converted prices on all 1,344 days it is valued.
 
 ### MSR events
 

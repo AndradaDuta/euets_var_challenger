@@ -20,6 +20,7 @@ BOOK_CONFIG = Path(__file__).resolve().parents[1] / "config" / "book.yaml"
 
 EUA_STALE = pd.Timestamp("2022-04-18")
 EUA_SPLICE = pd.Timestamp("2022-06-15")
+TTF_ROLL = pd.Timestamp("2022-09-30")  # 1 October 2022 is a Saturday; the October contract expired on Thursday 29 September
 UKA_HOLIDAYS = pd.to_datetime(["2022-05-02", "2022-08-29"])
 FX_HOLIDAYS = pd.to_datetime(["2022-04-15", "2022-05-02"])
 SAMPLE_END = pd.Timestamp("2022-12-15")
@@ -101,11 +102,27 @@ def test_group_exists_only_on_dates_every_book_is_valued(con, cfg, raw_dir):
     first_group = con.execute("SELECT MIN(date) FROM pnl WHERE level = 'group'").fetchone()[0]
     first_spread = con.execute("SELECT MIN(date) FROM pnl WHERE node = 'EUA_UKA_SPREAD'").fetchone()[0]
     assert first_group == first_spread == pd.Timestamp("2021-05-21").date()  # first UKA return
-    # After that, every node shares one calendar.
-    counts = con.execute(
-        "SELECT COUNT(DISTINCT n) FROM (SELECT COUNT(*) AS n FROM pnl WHERE date >= ? GROUP BY node)", [first_group]
+    # A group row exists exactly on the dates all three books are valued, never on a partial set.
+    books_per_date = "SELECT date, COUNT(*) AS n FROM pnl WHERE level = 'book' GROUP BY date"
+    partial = con.execute(
+        f"SELECT COUNT(*) FROM pnl g JOIN ({books_per_date}) b USING (date) WHERE g.level = 'group' AND b.n < 3"
     ).fetchone()[0]
-    assert counts == 1
+    missed = con.execute(
+        f"SELECT COUNT(*) FROM ({books_per_date}) b WHERE b.n = 3 "
+        "AND b.date NOT IN (SELECT date FROM pnl WHERE level = 'group')"
+    ).fetchone()[0]
+    assert partial == 0 and missed == 0
+
+
+def test_ttf_roll_day_removes_only_the_nodes_holding_gas(con, cfg, raw_dir):
+    run(con, cfg, raw_dir)
+    assert con.execute("SELECT COUNT(*) FROM returns WHERE factor = 'TTF' AND date = ?", [TTF_ROLL.date()]).fetchone()[0] == 0
+    nodes = {row[0] for row in con.execute("SELECT node FROM pnl WHERE date = ?", [TTF_ROLL.date()]).fetchall()}
+    assert nodes == {"EUA_OUTRIGHT", "COMPLIANCE", "EUA_UKA_SPREAD"}
+    # One roll per month: 23 month ends between February 2021 and the December 2022 sample end.
+    n_ttf = con.execute("SELECT COUNT(*) FROM returns WHERE factor = 'TTF'").fetchone()[0]
+    n_fx = con.execute("SELECT COUNT(*) FROM returns WHERE factor = 'GBPEUR'").fetchone()[0]
+    assert n_fx - n_ttf == 23
 
 
 def test_cleaning_rules_are_applied_but_raw_rows_are_kept(con, cfg, raw_dir):
@@ -113,12 +130,17 @@ def test_cleaning_rules_are_applied_but_raw_rows_are_kept(con, cfg, raw_dir):
     # Raw table: everything as downloaded, including rows after the sample end and the stale row.
     assert con.execute("SELECT MAX(date) FROM prices").fetchone()[0] > SAMPLE_END.date()
     assert con.execute("SELECT COUNT(*) FROM prices WHERE instrument = 'EUA' AND date = ?", [EUA_STALE.date()]).fetchone()[0] == 1
-    # Derived tables: cut at the sample end, no return on the stale, splice or UK-holiday dates.
+    # Derived tables: cut at the sample end, nothing at all on the stale or UK-holiday dates.
     assert con.execute("SELECT MAX(date) FROM returns").fetchone()[0] == SAMPLE_END.date()
     assert con.execute("SELECT MAX(date) FROM pnl").fetchone()[0] == SAMPLE_END.date()
-    for day in [EUA_STALE, EUA_SPLICE, *UKA_HOLIDAYS]:
+    for day in [EUA_STALE, *UKA_HOLIDAYS]:
         assert con.execute("SELECT COUNT(*) FROM returns WHERE date = ?", [day.date()]).fetchone()[0] == 0
         assert con.execute("SELECT COUNT(*) FROM pnl WHERE date = ?", [day.date()]).fetchone()[0] == 0
+    # On the EUA switch day only the EUA return is removed, and with it every node that holds EUA.
+    factors = {row[0] for row in con.execute("SELECT factor FROM returns WHERE date = ?", [EUA_SPLICE.date()]).fetchall()}
+    assert factors == {"UKA", "TTF", "GBPEUR"}
+    nodes = {row[0] for row in con.execute("SELECT node FROM pnl WHERE date = ?", [EUA_SPLICE.date()]).fetchall()}
+    assert nodes == {"CARBON_GAS_RV"}
     # The days after the two UK holidays carry flagged multi-day returns.
     assert con.execute("SELECT COUNT(DISTINCT date) FROM returns WHERE eua_days > 1 AND date > '2021-05-20'").fetchone()[0] == 2
 
@@ -136,7 +158,7 @@ def test_splice_jump_does_not_reach_the_pnl(con, cfg, raw_dir):
     # The two runs differ by exactly the splice-day return, which holds the 3% jump plus that day's move.
     splice_return = unclean - clean
     assert abs(splice_return - np.log(1.03)) < 0.15
-    assert con.execute("SELECT COUNT(*) FROM returns WHERE date = ?", [EUA_SPLICE.date()]).fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM returns WHERE factor = 'EUA' AND date = ?", [EUA_SPLICE.date()]).fetchone()[0] == 0
 
 
 def test_rerun_is_idempotent(con, cfg, raw_dir):

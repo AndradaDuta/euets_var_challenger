@@ -99,7 +99,25 @@ def test_book_pnl_sums_to_desk_and_group(cfg):
     np.testing.assert_allclose(
         wide["GROUP"], wide[["EUA_OUTRIGHT", "EUA_UKA_SPREAD", "CARBON_GAS_RV"]].sum(axis=1), rtol=1e-12, atol=1e-6
     )
-    assert not wide.isna().any().any()  # one calendar: every node has a row on every date
+    assert not wide.isna().any().any()  # one calendar: with no excluded returns, every node has every date
+
+
+def test_excluded_factor_return_removes_only_the_nodes_exposed_to_it(cfg):
+    """A missing TTF return (a roll day) takes out the gas book, its desk and the group, nothing else."""
+    prices, fx = random_market()
+    roll_day = prices.index[60]
+    returns = compute_returns(prices, fx, excluded={"TTF": [roll_day]})
+    attribution, _ = leg_pnl(returns, cfg)
+    pnl, _ = node_pnl(attribution, cfg)
+    on_roll_day = set(pnl.loc[pnl["date"] == roll_day, "node"])
+    assert on_roll_day == {"EUA_OUTRIGHT", "COMPLIANCE", "EUA_UKA_SPREAD"}
+    # Everywhere a parent has a row, it still equals the sum of its children.
+    wide = pnl.pivot(index="date", columns="node", values="hypothetical_pnl_eur")
+    group = wide["GROUP"].dropna()
+    children = wide.loc[group.index, ["EUA_OUTRIGHT", "EUA_UKA_SPREAD", "CARBON_GAS_RV"]]
+    assert not children.isna().any().any()
+    np.testing.assert_allclose(group, children.sum(axis=1), rtol=1e-12, atol=1e-6)
+    assert len(group) == len(returns) - 1
 
 
 def test_portfolio_return_is_weighted_sum_of_simple_leg_returns(cfg):
